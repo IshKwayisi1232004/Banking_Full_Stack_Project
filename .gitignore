@@ -1,97 +1,99 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-lock.yaml
-package-lock.json
-
-# Environment
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-logs/
-*.log
-pids/
-*.pid
-*.seed
-
-# Editors
-.vscode/
-.idea/
+# ======================
+# OS FILES
+# ======================
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# Coverage
-coverage/
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# dependencies
-/node_modules
-/.pnp
+# Linux
+*~
+
+# ======================
+# DEPENDENCIES
+# ======================
+node_modules/
+.pnp
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
-# testing
-/coverage
+# ======================
+# ENV FILES
+# ======================
+.env
+.env.*
+!.env.example
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# ======================
+# LOGS
+# ======================
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# ======================
+# BUILD OUTPUT
+# ======================
+dist/
+dist-ssr/
+build/
+out/
+coverage/
 
-# vercel
-.vercel
+# ======================
+# FRAMEWORKS
+# ======================
 
-# typescript
+# Next.js (если вдруг добавите)
+.next/
+
+# Vite cache
+.vite/
+
+# ======================
+# TYPESCRIPT
+# ======================
 *.tsbuildinfo
-next-env.d.ts
+
+# ======================
+# EDITORS / IDE
+# ======================
+
+# VSCode
+.vscode/*
+!.vscode/extensions.json
+
+# JetBrains
+.idea/
+
+# Vim
+*.swp
+*.swo
+
+# ======================
+# PACKAGE LOCKS (опционально)
+# ======================
+pnpm-lock.yaml
+
+# ======================
+# DOCKER (если будет)
+# ======================
+docker-compose.override.yml
+
+# ======================
+# TESTING
+# ======================
+coverage/
+
+# ======================
+# MISC
+# ======================
+*.pem
