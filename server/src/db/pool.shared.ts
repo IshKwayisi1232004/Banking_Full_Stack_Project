@@ -1,4 +1,5 @@
-import { Pool, PoolClient } from "pg";
+import { Pool } from "pg";
+import type { PoolClient } from "pg";
 
 const SSL_DISABLED_VALUES = new Set(["1", "true", "yes"]);
 

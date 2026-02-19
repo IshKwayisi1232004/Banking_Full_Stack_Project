@@ -1,4 +1,4 @@
-import { PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { TransferRequest } from "./transaction.types";
 
 interface BalanceRow {

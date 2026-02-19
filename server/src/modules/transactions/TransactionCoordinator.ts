@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { corePool, ledgerPool } from "../../db";
 import { CoreRepository } from "./CoreRepository";
 import {
