@@ -40,3 +40,33 @@
 .read-the-docs {
   color: #888;
 }
+
+
+.home-page {
+  padding: 2rem;
+  font-family: Arial, sans-serif;
+}
+
+.account-summary {
+  display: flex;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.account-card {
+  background-color: #f4f6f8;
+  padding: 1.5rem;
+  border-radius: 10px;
+  width: 200px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.quick-actions button {
+  margin-right: 1rem;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  background-color: #0052cc;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+}
