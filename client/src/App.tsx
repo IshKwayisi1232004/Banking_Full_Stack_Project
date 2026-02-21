@@ -2,7 +2,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import HomePage from "./pages/HomePage";
-//import TransactionsPage from "./pages/TransactionsPage";
+import TransactionsPage from "./pages/TransactionPage";
+////import TransactionsPage from "./pages/TransactionsPage";
 
 function App() {
   return (
@@ -21,6 +22,18 @@ function App() {
           }
         />
       </Routes>
+
+      <Routes>
+        <Route
+          path="/transactions"
+          element={
+            <ProtectedRoute>
+              <TransactionsPage />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+
     </BrowserRouter>
   );
 }

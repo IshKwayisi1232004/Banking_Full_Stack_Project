@@ -70,3 +70,24 @@
   border-radius: 6px;
   cursor: pointer;
 }
+
+.transactions-page {
+  padding: 2rem;
+}
+
+.transactions-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.transactions-table th,
+.transactions-table td {
+  padding: 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.transactions-table th {
+  background-color: #0052cc;
+  color: white;
+}
