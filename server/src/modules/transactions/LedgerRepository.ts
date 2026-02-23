@@ -7,9 +7,9 @@ import {
 } from "./transaction.types";
 
 interface TransactionRow {
-  id: string;
-  from_usr_id: string;
-  to_usr_id: string;
+  trx_id: string;
+  from_acc: string;
+  to_acc: string;
   amount: string;
   status: string;
   created_at: string;
@@ -29,13 +29,13 @@ export class LedgerRepository {
      */
     await client.query(
       `
-      INSERT INTO transactions (id, from_usr_id, to_usr_id, amount, status)
+      INSERT INTO transactions (trx_id, from_acc, to_acc, amount, status)
       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5)
       `,
       [
         transactionId,
-        request.fromUserId,
-        request.toUserId,
+        request.fromAccountId,
+        request.toAccountId,
         request.amount,
         LedgerTransactionStatus.PENDING,
       ],
@@ -43,7 +43,7 @@ export class LedgerRepository {
 
     await client.query(
       `
-      INSERT INTO entries (transaction_id, acc_id, amount)
+      INSERT INTO entries (trx_id, acc_id, amount)
       VALUES
         ($1::uuid, $2::uuid, ($3::numeric * -1)),
         ($1::uuid, $4::uuid, $3::numeric)
@@ -62,7 +62,7 @@ export class LedgerRepository {
       `
       UPDATE transactions
       SET status = $2
-      WHERE id = $1::uuid
+      WHERE trx_id = $1::uuid
       `,
       [transactionId, LedgerTransactionStatus.COMMITTED],
     );
@@ -73,7 +73,7 @@ export class LedgerRepository {
       `
       UPDATE transactions
       SET status = $2
-      WHERE id = $1::uuid
+      WHERE trx_id = $1::uuid
         AND UPPER(status) = $3
       `,
       [
@@ -97,15 +97,15 @@ export class LedgerRepository {
 
       await client.query(
         `
-        INSERT INTO transactions (id, from_usr_id, to_usr_id, amount, status)
+        INSERT INTO transactions (trx_id, from_acc, to_acc, amount, status)
         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5)
-        ON CONFLICT (id)
+        ON CONFLICT (trx_id)
         DO UPDATE SET status = EXCLUDED.status
         `,
         [
           transactionId,
-          request.fromUserId,
-          request.toUserId,
+          request.fromAccountId,
+          request.toAccountId,
           request.amount,
           LedgerTransactionStatus.COMMITTED,
         ],
@@ -114,14 +114,14 @@ export class LedgerRepository {
       await client.query(
         `
         DELETE FROM entries
-        WHERE transaction_id = $1::uuid
+        WHERE trx_id = $1::uuid
         `,
         [transactionId],
       );
 
       await client.query(
         `
-        INSERT INTO entries (transaction_id, acc_id, amount)
+        INSERT INTO entries (trx_id, acc_id, amount)
         VALUES
           ($1::uuid, $2::uuid, ($3::numeric * -1)),
           ($1::uuid, $4::uuid, $3::numeric)
@@ -153,15 +153,15 @@ export class LedgerRepository {
      */
     await this.pool.query(
       `
-      INSERT INTO transactions (id, from_usr_id, to_usr_id, amount, status)
+      INSERT INTO transactions (trx_id, from_acc, to_acc, amount, status)
       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::numeric, $5)
-      ON CONFLICT (id)
+      ON CONFLICT (trx_id)
       DO UPDATE SET status = EXCLUDED.status
       `,
       [
         transactionId,
-        request.fromUserId,
-        request.toUserId,
+        request.fromAccountId,
+        request.toAccountId,
         request.amount,
         LedgerTransactionStatus.ABORTED,
       ],
@@ -172,14 +172,14 @@ export class LedgerRepository {
     const result = await this.pool.query<TransactionRow>(
       `
       SELECT
-        id,
-        from_usr_id,
-        to_usr_id,
+        trx_id,
+        from_acc,
+        to_acc,
         amount::text AS amount,
         status,
         created_at::text AS created_at
       FROM transactions
-      WHERE id = $1::uuid
+      WHERE trx_id = $1::uuid
       `,
       [transactionId],
     );

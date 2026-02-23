@@ -24,8 +24,8 @@ export class CoreRepository {
      */
     const lockedRows = await client.query<BalanceRow>(
       `
-      SELECT acc_id, amount::text AS amount
-      FROM balances
+      SELECT acc_id, balance::text AS amount
+      FROM accounts
       WHERE acc_id = ANY($1::uuid[])
       ORDER BY acc_id
       FOR UPDATE
@@ -39,11 +39,11 @@ export class CoreRepository {
 
     const debitResult = await client.query<BalanceRow>(
       `
-      UPDATE balances
-      SET amount = amount - $1::numeric, updated_at = NOW()
+      UPDATE accounts
+      SET balance = balance - $1::numeric, updated_at = NOW()
       WHERE acc_id = $2::uuid
-        AND amount >= $1::numeric
-      RETURNING acc_id, amount::text AS amount
+        AND balance >= $1::numeric
+      RETURNING acc_id, balance::text AS amount
       `,
       [request.amount, request.fromAccountId],
     );
@@ -54,10 +54,10 @@ export class CoreRepository {
 
     const creditResult = await client.query<BalanceRow>(
       `
-      UPDATE balances
-      SET amount = amount + $1::numeric, updated_at = NOW()
+      UPDATE accounts
+      SET balance = balance + $1::numeric, updated_at = NOW()
       WHERE acc_id = $2::uuid
-      RETURNING acc_id, amount::text AS amount
+      RETURNING acc_id, balance::text AS amount
       `,
       [request.amount, request.toAccountId],
     );
