@@ -1,62 +1,62 @@
-import React, {useState } from "react"; 
-import type { LoginCredentials } from "../types/auth";
+import React, { useState } from "react";
+import type { AuthCredentials, AuthMode } from "../types/auth";
 
 interface LoginFormProps {
-    onLogin: (credentials: LoginCredentials) => Promise<void>;
+  onSubmit: (credentials: AuthCredentials, mode: AuthMode) => Promise<void>;
 }
 
-const LoginForm: React.FC<LoginFormProps> = ({onLogin}) => {
-    const [formData, setFormData] = useState<LoginCredentials>({
-        email: "",
-        password: "",
+const LoginForm: React.FC<LoginFormProps> = ({ onSubmit }) => {
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [formData, setFormData] = useState<AuthCredentials>({
+    username: "",
+    password: "",
+  });
+
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
     });
+  };
 
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({
-            ...formData, 
-            [e.target.name]: e.target.value,
-        });
-    };
+    if (!formData.username || !formData.password) {
+      setError("All fields are required.");
+      return;
+    }
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    try {
+      setLoading(true);
+      setError(null);
+      await onSubmit(formData, mode);
+    } catch (err: object | unknown) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        if (!formData.email || !formData.password){
-            setError("All fields are required.");
-            return; 
-        }
-
-        try {
-            setLoading(true); 
-            setError(null);
-            await onLogin(formData);
-        } catch (err){
-            setError("Invalid email or password.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
+  return (
     <form onSubmit={handleSubmit} className="login-form">
-      <h2>Secure Login</h2>
-
+      <h2>{mode === "login" ? "Logging" : "Registering"}</h2>
       {error && <p style={{ color: "red" }}>{error}</p>}
 
-      <div>
-        <label>Email</label>
+      <div className="login-row">
+        <label>Username</label>
         <input
-          type="email"
-          name="email"
-          value={formData.email}
+          type="text"
+          name="username"
+          value={formData.username}
           onChange={handleChange}
         />
       </div>
 
-      <div>
+      <div className="login-row">
         <label>Password</label>
         <input
           type="password"
@@ -67,7 +67,23 @@ const LoginForm: React.FC<LoginFormProps> = ({onLogin}) => {
       </div>
 
       <button type="submit" disabled={loading}>
-        {loading ? "Logging in..." : "Login"}
+        {loading
+          ? mode === "login"
+            ? "Logging in..."
+            : "Creating account..."
+          : mode === "login"
+            ? "Login"
+            : "Register"}
+      </button>
+
+      <button
+        type="button"
+        disabled={loading}
+        onClick={() =>
+          setMode((prev) => (prev === "login" ? "register" : "login"))
+        }
+      >
+        {mode === "login" ? "Register" : "Login"}
       </button>
     </form>
   );

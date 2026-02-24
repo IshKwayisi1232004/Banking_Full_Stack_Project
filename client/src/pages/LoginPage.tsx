@@ -1,13 +1,16 @@
 import {useNavigate} from "react-router-dom";
 import LoginForm from "../components/LoginForm";
-import { login } from "../services/authService";
-import type { LoginCredentials } from "../types/auth";
+import { login, register } from "../services/authService";
+import type { AuthCredentials, AuthMode } from "../types/auth";
 
 const LoginPage = () => {
     const navigate = useNavigate(); 
 
-    const handleLogin = async (credentials: LoginCredentials) => {
-        const response = await login(credentials);
+    const handleAuth = async (credentials: AuthCredentials, mode: AuthMode) => {
+        const response =
+            mode === "login"
+                ? await login(credentials)
+                : await register(credentials);
 
         localStorage.setItem("token", response.token);
         navigate("/home");
@@ -15,7 +18,7 @@ const LoginPage = () => {
 
     return (
         <div className="login-page">
-            <LoginForm onLogin={handleLogin}/>
+            <LoginForm onSubmit={handleAuth}/>
         </div>
     );
 };
