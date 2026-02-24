@@ -1,140 +1,412 @@
-import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  adjustAccountBalance,
+  getAccountTransactions,
+  getAccountsOverview,
+  makeAccountTransfer,
+} from "../services/accountsService";
+import type { AccountInfo, AccountTransaction } from "../types/account";
 
-interface Transaction {
-  id: string;
-  date: string;
-  description: string;
-  amount: number;
-  type: "debit" | "credit";
-}
-
-const mockTransactions: Transaction[] = [
-  {
-    id: "1",
-    date: "2026-02-18",
-    description: "Grocery Store",
-    amount: -85.23,
-    type: "debit",
-  },
-  {
-    id: "2",
-    date: "2026-02-17",
-    description: "Paycheck",
-    amount: 1500.0,
-    type: "credit",
-  },
-  {
-    id: "3",
-    date: "2026-02-15",
-    description: "Electric Bill",
-    amount: -120.5,
-    type: "debit",
-  },
-];
-
-interface Account {
-  id: string;
-  name: string;
-}
-
-const mockAccounts: Account[] = [
-  { id: "acc-001", name: "Checking" },
-  { id: "acc-002", name: "Savings" },
-];
-
+type ModalKind = "none" | "adjust" | "transfer";
+type AdjustMode = "deposit" | "withdraw";
 
 const TransactionsPage = () => {
-
-  const [amount, setAmount] = useState("");
-  const [type, setType] = useState<"deposit" | "withdraw">("deposit");
-  const [selectedAccount, setSelectedAccount] = useState<string>("acc-001");
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedAccountId = searchParams.get("accountId");
+  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [transactions, setTransactions] = useState<AccountTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [activeModal, setActiveModal] = useState<ModalKind>("none");
+  const [adjustMode, setAdjustMode] = useState<AdjustMode>("deposit");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferTargetAccount, setTransferTargetAccount] = useState("");
+
+  const selectedAccountData = useMemo(
+    () => accounts.find((account) => account.acc_id === selectedAccount) ?? null,
+    [accounts, selectedAccount],
+  );
+
+  const transferTargetOptions = useMemo(
+    () => accounts.filter((account) => account.acc_id !== selectedAccount),
+    [accounts, selectedAccount],
+  );
+
+  const loadOverviewAndTransactions = async (token: string): Promise<void> => {
+    const overview = await getAccountsOverview(token);
+    setAccounts(overview.accounts);
+
+    const fallbackAccountId = overview.accounts[0]?.acc_id ?? "";
+    const nextAccountId =
+      (overview.accounts.find((item) => item.acc_id === requestedAccountId)?.acc_id ??
+        selectedAccount) ||
+      fallbackAccountId;
+
+    if (!nextAccountId) {
+      setSelectedAccount("");
+      setTransactions([]);
+      return;
+    }
+
+    setSelectedAccount(nextAccountId);
+    if (requestedAccountId !== nextAccountId) {
+      setSearchParams({ accountId: nextAccountId }, { replace: true });
+    }
+
+    const txResponse = await getAccountTransactions(token, nextAccountId);
+    setTransactions(txResponse.transactions);
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    void loadOverviewAndTransactions(token)
+      .then(() => {
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        const message =
+          err instanceof Error ? err.message : "Failed to load transactions.";
+        setError(message);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [navigate, requestedAccountId, setSearchParams]);
+
+  const handleAccountChange = async (
+    event: React.ChangeEvent<HTMLSelectElement>,
+  ) => {
+    const accountId = event.target.value;
+    setSelectedAccount(accountId);
+    setSearchParams({ accountId });
+
+    const token = localStorage.getItem("token");
+    if (!token || !accountId) {
+      return;
+    }
+
+    setError(null);
+    try {
+      const txResponse = await getAccountTransactions(token, accountId);
+      setTransactions(txResponse.transactions);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load transactions.";
+      setError(message);
+    }
+  };
+
+  const openAdjustModal = () => {
+    setAdjustMode("deposit");
+    setAdjustAmount("");
+    setActiveModal("adjust");
+    setError(null);
+  };
+
+  const openTransferModal = () => {
+    setTransferAmount("");
+    setTransferTargetAccount(transferTargetOptions[0]?.acc_id ?? "");
+    setActiveModal("transfer");
+    setError(null);
+  };
+
+  const closeModal = () => {
+    setActiveModal("none");
+    setSubmitting(false);
+  };
+
+  const handleSubmitAdjust = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const token = localStorage.getItem("token");
+    if (!token || !selectedAccount) {
+      setError("Missing auth token or selected account.");
+      return;
+    }
+
+    const amount = Number(adjustAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Enter a positive amount.");
+      return;
+    }
+
+    const delta = adjustMode === "deposit" ? amount : -amount;
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await adjustAccountBalance(token, selectedAccount, delta);
+      await loadOverviewAndTransactions(token);
+      closeModal();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to adjust account balance.";
+      setError(message);
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmitTransfer = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const token = localStorage.getItem("token");
+    if (!token || !selectedAccount) {
+      setError("Missing auth token or selected account.");
+      return;
+    }
+
+    if (!transferTargetAccount) {
+      setError("Choose destination account id.");
+      return;
+    }
+
+    const amount = Number(transferAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Transfer amount must be a positive number.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      await makeAccountTransfer(token, selectedAccount, transferTargetAccount, amount);
+      await loadOverviewAndTransactions(token);
+      closeModal();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to execute transfer.";
+      setError(message);
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="transactions-page">
-      <h1>Transaction History</h1>
+      <header className="transactions-header">
+        <div>
+          <p className="transactions-kicker">Operations</p>
+          <h1>Account Transactions</h1>
+          <p className="transactions-subtitle">
+            Select account, then choose Deposit/Withdraw or Make Transaction.
+          </p>
+        </div>
+        <button className="btn btn-secondary" onClick={() => navigate("/home")}>
+          Back to Dashboard
+        </button>
+      </header>
 
-      <button onClick={() => navigate("/home")}>
-        Back to Dashboard
-      </button>
+      {loading && <p className="home-state">Loading accounts...</p>}
+      {error && <p className="home-state home-state-error">{error}</p>}
 
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
+      <section className="transactions-panel">
+        <div className="transactions-form">
+          <h2>Selected Account</h2>
 
-          const token = localStorage.getItem("token");
+          <div className="transactions-input-row">
+            <label htmlFor="account">acc_id</label>
+            <select
+              id="account"
+              value={selectedAccount}
+              onChange={handleAccountChange}
+              disabled={accounts.length === 0}
+            >
+              {accounts.map((account) => (
+                <option key={account.acc_id} value={account.acc_id}>
+                  {account.acc_id}
+                </option>
+              ))}
+            </select>
+          </div>
 
-          await fetch("http://localhost:3000/api/transactions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              amount: Number(amount),
-              type,
-            }),
-          });
+          {selectedAccountData && (
+            <div className="transactions-account-meta">
+              <p>
+                <strong>acc_id:</strong> {selectedAccountData.acc_id}
+              </p>
+              <p>
+                <strong>user_id:</strong> {selectedAccountData.user_id}
+              </p>
+              <p>
+                <strong>balance:</strong> ${selectedAccountData.balance}
+              </p>
+            </div>
+          )}
 
-          setAmount("");
-        }}
-      >
-        <h2>Create Transaction</h2>
+          <div className="transactions-actions">
+            <button className="btn btn-primary" type="button" onClick={openAdjustModal}>
+              Deposit / Withdraw
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={openTransferModal}
+              disabled={transferTargetOptions.length === 0}
+            >
+              Make Transaction
+            </button>
+          </div>
+        </div>
+      </section>
 
-        <select
-          value={selectedAccount}
-          onChange={(e) => setSelectedAccount(e.target.value)}
-        >
-          {mockAccounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.name}
-            </option>
-          ))}
-        </select>
-        
-        <select value={type} onChange={(e) => setType(e.target.value as any)}>
-          <option value="deposit">Deposit</option>
-          <option value="withdraw">Withdraw</option>
-        </select>
+      <section className="transactions-history">
+        <div className="transactions-history-head">
+          <h3>Last 5 Transactions</h3>
+        </div>
 
-        <input
-          type="number"
-          placeholder="Amount"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
+        <div className="transactions-table-wrap">
+          <table className="transactions-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
 
-        <button type="submit">Submit</button>
-      </form>
+            <tbody>
+              {transactions.map((transaction) => {
+                const amountNumber = Number(transaction.amount);
+                const amountClass =
+                  Number.isFinite(amountNumber) && amountNumber < 0
+                    ? "amount-negative"
+                    : "amount-positive";
 
-      <table className="transactions-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Description</th>
-            <th>Type</th>
-            <th>Amount</th>
-          </tr>
-        </thead>
+                return (
+                  <tr key={transaction.id}>
+                    <td>{new Date(transaction.date).toLocaleString()}</td>
+                    <td>{transaction.description}</td>
+                    <td>{transaction.status}</td>
+                    <td className={amountClass}>
+                      {Number.isFinite(amountNumber) && amountNumber > 0 ? "+" : ""}
+                      {transaction.amount}
+                    </td>
+                  </tr>
+                );
+              })}
+              {transactions.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={4}>No transactions found for this account.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-        <tbody>
-          {mockTransactions.map((transaction) => (
-            <tr key={transaction.id}>
-              <td>{transaction.date}</td>
-              <td>{transaction.description}</td>
-              <td>{transaction.type}</td>
-              <td
-                style={{
-                  color: transaction.type === "debit" ? "red" : "green",
-                }}
-              >
-                ${Math.abs(transaction.amount).toFixed(2)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {activeModal !== "none" && (
+        <div className="modal-overlay" onClick={closeModal} role="presentation">
+          <div
+            className="modal-card"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            {activeModal === "adjust" && (
+              <form className="modal-form" onSubmit={handleSubmitAdjust}>
+                <h3>Deposit / Withdraw</h3>
+                <p>
+                  Current account (locked): <strong>{selectedAccount}</strong>
+                </p>
+
+                <div className="modal-toggle">
+                  <button
+                    type="button"
+                    className={`btn ${adjustMode === "deposit" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setAdjustMode("deposit")}
+                  >
+                    Deposit
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${adjustMode === "withdraw" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setAdjustMode("withdraw")}
+                  >
+                    Withdraw
+                  </button>
+                </div>
+
+                <div className="transactions-input-row">
+                  <label htmlFor="adjustAmount">Amount</label>
+                  <input
+                    id="adjustAmount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={adjustAmount}
+                    onChange={(event) => setAdjustAmount(event.target.value)}
+                    placeholder="Positive amount"
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button className="btn btn-primary" type="submit" disabled={submitting}>
+                    {submitting ? "Applying..." : "Apply"}
+                  </button>
+                  <button className="btn btn-secondary" type="button" onClick={closeModal}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {activeModal === "transfer" && (
+              <form className="modal-form" onSubmit={handleSubmitTransfer}>
+                <h3>Make Transaction</h3>
+                <p>
+                  From account (locked): <strong>{selectedAccount}</strong>
+                </p>
+
+                <div className="transactions-input-row">
+                  <label htmlFor="targetAccount">To account id</label>
+                  <select
+                    id="targetAccount"
+                    value={transferTargetAccount}
+                    onChange={(event) => setTransferTargetAccount(event.target.value)}
+                  >
+                    {transferTargetOptions.map((account) => (
+                      <option key={account.acc_id} value={account.acc_id}>
+                        {account.acc_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="transactions-input-row">
+                  <label htmlFor="transferAmount">Amount</label>
+                  <input
+                    id="transferAmount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={transferAmount}
+                    onChange={(event) => setTransferAmount(event.target.value)}
+                    placeholder="Positive amount"
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button className="btn btn-primary" type="submit" disabled={submitting}>
+                    {submitting ? "Submitting..." : "Send"}
+                  </button>
+                  <button className="btn btn-secondary" type="button" onClick={closeModal}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
