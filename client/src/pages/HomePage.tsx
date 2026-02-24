@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe } from "../services/authService";
-import type { AuthUser } from "../types/auth";
+import { createAccount, getAccountsOverview } from "../services/accountsService";
+import type { AccountInfo, OverviewUser } from "../types/account";
 
 const HomePage = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const [user, setUser] = useState<OverviewUser | null>(null);
+  const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creatingAccount, setCreatingAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const refreshOverview = async (token: string): Promise<void> => {
+    const response = await getAccountsOverview(token);
+    setUser(response.user);
+    setAccounts(response.accounts);
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -21,20 +29,40 @@ const HomePage = () => {
       return;
     }
 
-    void getMe(token)
-      .then((response) => {
-        setUser(response.user);
+    void refreshOverview(token)
+      .then(() => {
         setError(null);
       })
       .catch((err: unknown) => {
         const message =
-          err instanceof Error ? err.message : "Failed to load user profile.";
+          err instanceof Error ? err.message : "Failed to load account overview.";
         setError(message);
       })
       .finally(() => {
         setLoading(false);
       });
   }, [navigate]);
+
+  const handleAddAccount = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    setCreatingAccount(true);
+    setError(null);
+    try {
+      await createAccount(token, 0);
+      await refreshOverview(token);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create account.";
+      setError(message);
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
 
   return (
     <div className="home-page">
@@ -43,6 +71,9 @@ const HomePage = () => {
           <p className="home-kicker">Banking Dashboard</p>
           <h1>Welcome back</h1>
           <p className="home-subtitle">Track balances and control your money flow.</p>
+          <p className="home-subtitle">
+            user_id: <strong>{user?.id ?? "unknown"}</strong>
+          </p>
         </div>
         <button className="btn btn-secondary" onClick={handleLogout}>
           Logout
@@ -54,56 +85,49 @@ const HomePage = () => {
 
       <section className="home-metrics">
         <article className="metric-card metric-card-primary">
-          <p>balance</p>
-          <h2>{user?.balance ? `$${user.balance}` : "$0.00"}</h2>
-          <span>From /auth/me</span>
+          <p>username</p>
+          <h2>{user?.username ?? "unknown"}</h2>
+          <span>Authenticated user</span>
         </article>
         <article className="metric-card">
-          <p>acc_id</p>
-          <h2>{user?.accountId ?? "No account"}</h2>
-          <span>Primary account</span>
-        </article>
-        <article className="metric-card">
-          <p>user_id</p>
-          <h2>{user?.id ?? "Unknown user"}</h2>
-          <span>Authenticated profile</span>
+          <p>accounts</p>
+          <h2>{accounts.length}</h2>
+          <span>Total linked accounts</span>
         </article>
       </section>
 
       <section className="home-actions">
-        <button className="btn btn-primary" onClick={() => navigate("/transactions")}>
-          View Transactions
+        <button
+          className="btn btn-primary"
+          onClick={handleAddAccount}
+          disabled={creatingAccount}
+        >
+          {creatingAccount ? "Creating..." : "Add Account"}
         </button>
-        <button className="btn btn-ghost">Transfer Money</button>
-        <button className="btn btn-ghost">Top Up Account</button>
       </section>
 
       <section className="home-history">
         <div className="history-head">
-          <h3>Recent Activity</h3>
-          <button className="btn btn-link" onClick={() => navigate("/transactions")}>
-            Open Full History
-          </button>
+          <h3>Your Accounts</h3>
         </div>
         <div className="history-list">
-          <div className="history-row">
-            <span>2026-02-18</span>
-            <span>Grocery Store</span>
-            <span className="chip chip-debit">debit</span>
-            <strong className="amount-debit">-$85.23</strong>
-          </div>
-          <div className="history-row">
-            <span>2026-02-17</span>
-            <span>Paycheck</span>
-            <span className="chip chip-credit">credit</span>
-            <strong className="amount-credit">+$1500.00</strong>
-          </div>
-          <div className="history-row">
-            <span>2026-02-15</span>
-            <span>Electric Bill</span>
-            <span className="chip chip-debit">debit</span>
-            <strong className="amount-debit">-$120.50</strong>
-          </div>
+          {accounts.map((account) => (
+            <button
+              key={account.acc_id}
+              className="history-row account-row-button"
+              onClick={() =>
+                navigate(`/transactions?accountId=${account.acc_id}`)
+              }
+              type="button"
+            >
+              <span>{account.acc_id}</span>
+              <span>{account.user_id}</span>
+              <strong className="amount-positive">${account.balance}</strong>
+            </button>
+          ))}
+          {accounts.length === 0 && !loading && (
+            <p className="home-state">No accounts found for this user.</p>
+          )}
         </div>
       </section>
     </div>
