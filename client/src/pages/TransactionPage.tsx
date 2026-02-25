@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   adjustAccountBalance,
@@ -38,30 +38,33 @@ const TransactionsPage = () => {
     [accounts, selectedAccount],
   );
 
-  const loadOverviewAndTransactions = async (token: string): Promise<void> => {
-    const overview = await getAccountsOverview(token);
-    setAccounts(overview.accounts);
+  const loadOverviewAndTransactions = useCallback(
+    async (token: string, preferredAccountId?: string): Promise<void> => {
+      const overview = await getAccountsOverview(token);
+      setAccounts(overview.accounts);
 
-    const fallbackAccountId = overview.accounts[0]?.acc_id ?? "";
-    const nextAccountId =
-      (overview.accounts.find((item) => item.acc_id === requestedAccountId)?.acc_id ??
-        selectedAccount) ||
-      fallbackAccountId;
+      const fallbackAccountId = overview.accounts[0]?.acc_id ?? "";
+      const nextAccountId =
+        (overview.accounts.find((item) => item.acc_id === requestedAccountId)?.acc_id ??
+          preferredAccountId) ||
+        fallbackAccountId;
 
-    if (!nextAccountId) {
-      setSelectedAccount("");
-      setTransactions([]);
-      return;
-    }
+      if (!nextAccountId) {
+        setSelectedAccount("");
+        setTransactions([]);
+        return;
+      }
 
-    setSelectedAccount(nextAccountId);
-    if (requestedAccountId !== nextAccountId) {
-      setSearchParams({ accountId: nextAccountId }, { replace: true });
-    }
+      setSelectedAccount(nextAccountId);
+      if (requestedAccountId !== nextAccountId) {
+        setSearchParams({ accountId: nextAccountId }, { replace: true });
+      }
 
-    const txResponse = await getAccountTransactions(token, nextAccountId);
-    setTransactions(txResponse.transactions);
-  };
+      const txResponse = await getAccountTransactions(token, nextAccountId);
+      setTransactions(txResponse.transactions);
+    },
+    [requestedAccountId, setSearchParams],
+  );
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -70,19 +73,33 @@ const TransactionsPage = () => {
       return;
     }
 
-    void loadOverviewAndTransactions(token)
-      .then(() => {
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        const message =
-          err instanceof Error ? err.message : "Failed to load transactions.";
-        setError(message);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [navigate, requestedAccountId, setSearchParams]);
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      void loadOverviewAndTransactions(token)
+        .then(() => {
+          if (!cancelled) {
+            setError(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            const message =
+              err instanceof Error ? err.message : "Failed to load transactions.";
+            setError(message);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadOverviewAndTransactions, navigate]);
 
   const handleAccountChange = async (
     event: React.ChangeEvent<HTMLSelectElement>,
@@ -146,7 +163,7 @@ const TransactionsPage = () => {
     setError(null);
     try {
       await adjustAccountBalance(token, selectedAccount, delta);
-      await loadOverviewAndTransactions(token);
+      await loadOverviewAndTransactions(token, selectedAccount);
       closeModal();
     } catch (err: unknown) {
       const message =
@@ -179,7 +196,7 @@ const TransactionsPage = () => {
     setError(null);
     try {
       await makeAccountTransfer(token, selectedAccount, transferTargetAccount, amount);
-      await loadOverviewAndTransactions(token);
+      await loadOverviewAndTransactions(token, selectedAccount);
       closeModal();
     } catch (err: unknown) {
       const message =
