@@ -1,0 +1,22 @@
+PORT=5001
+
+# Core DB (users/accounts/balances)
+CORE_DB_URL=postgresql://postgres:<password>@<host>:5432/postgres
+
+# Ledger DB (transactions/entries)
+LEDGER_DB_URL=postgresql://postgres:<password>@<host>:5432/postgres
+
+# Optional: disable TLS for local non-SSL DB
+PG_DISABLE_SSL=false
+
+# Optional: failpoint simulation toggle
+SIMULATE_FAILURE=false
+
+# Auth token signing key (change in production)
+AUTH_SECRET=dev-auth-secret-change-me
+
+# Auth token lifetime in seconds (24h)
+AUTH_TOKEN_TTL_SECONDS=86400
+
+# bcrypt cost factor (higher = slower, safer)
+BCRYPT_SALT_ROUNDS=12
