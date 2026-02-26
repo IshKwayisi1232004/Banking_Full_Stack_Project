@@ -8,6 +8,10 @@ declare module "pg" {
   export interface PoolConfig {
     connectionString?: string;
     ssl?: boolean | { rejectUnauthorized?: boolean };
+    connectionTimeoutMillis?: number;
+    idleTimeoutMillis?: number;
+    keepAlive?: boolean;
+    max?: number;
   }
 
   export class PoolClient {
@@ -25,5 +29,6 @@ declare module "pg" {
       text: string,
       values?: unknown[],
     ): Promise<QueryResult<R>>;
+    on(event: "error", listener: (error: Error) => void): this;
   }
 }

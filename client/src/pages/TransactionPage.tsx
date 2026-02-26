@@ -2,14 +2,51 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   adjustAccountBalance,
+  getTransactionStatus,
   getAccountTransactions,
   getAccountsOverview,
+  getRecipientAccounts,
   makeAccountTransfer,
+  recoverTransaction,
+  simulateTransferWithFailPoint,
 } from "../services/accountsService";
-import type { AccountInfo, AccountTransaction } from "../types/account";
+import type {
+  AccountInfo,
+  AccountTransaction,
+  FailPoint,
+  OverviewUser,
+  SimulatedTransferResponse,
+} from "../types/account";
 
 type ModalKind = "none" | "adjust" | "transfer";
 type AdjustMode = "deposit" | "withdraw";
+type SimulatedTransferView = {
+  success: boolean;
+  transactionId: string;
+  phase: string;
+  failPointTriggered?: string;
+  errorMessage?: string;
+};
+
+const FAIL_POINT_OPTIONS: FailPoint[] = [
+  "BEFORE_CORE_PREPARE",
+  "BEFORE_LEDGER_PREPARE",
+  "BEFORE_COMMIT",
+  "AFTER_CORE_COMMIT",
+  "AFTER_LEDGER_COMMIT",
+];
+
+function mapSimulationView(
+  simulation: SimulatedTransferResponse,
+): SimulatedTransferView {
+  return {
+    success: simulation.success,
+    transactionId: simulation.transactionId,
+    phase: simulation.state.phase,
+    failPointTriggered: simulation.state.failPointTriggered,
+    errorMessage: simulation.state.errorMessage,
+  };
+}
 
 const TransactionsPage = () => {
   const navigate = useNavigate();
@@ -26,15 +63,23 @@ const TransactionsPage = () => {
   const [adjustMode, setAdjustMode] = useState<AdjustMode>("deposit");
   const [adjustAmount, setAdjustAmount] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
+  const [transferRecipientUsername, setTransferRecipientUsername] = useState("");
+  const [transferRecipientUser, setTransferRecipientUser] =
+    useState<OverviewUser | null>(null);
+  const [transferRecipientAccounts, setTransferRecipientAccounts] = useState<
+    AccountInfo[]
+  >([]);
   const [transferTargetAccount, setTransferTargetAccount] = useState("");
+  const [transferFailPoint, setTransferFailPoint] = useState<FailPoint | "">("");
+  const [transferSubmittedOnce, setTransferSubmittedOnce] = useState(false);
+  const [simulatedTransfer, setSimulatedTransfer] =
+    useState<SimulatedTransferView | null>(null);
+  const [simulationMessage, setSimulationMessage] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const isRecoveryRequired = simulatedTransfer?.phase === "IN_DOUBT";
 
   const selectedAccountData = useMemo(
     () => accounts.find((account) => account.acc_id === selectedAccount) ?? null,
-    [accounts, selectedAccount],
-  );
-
-  const transferTargetOptions = useMemo(
-    () => accounts.filter((account) => account.acc_id !== selectedAccount),
     [accounts, selectedAccount],
   );
 
@@ -133,14 +178,67 @@ const TransactionsPage = () => {
 
   const openTransferModal = () => {
     setTransferAmount("");
-    setTransferTargetAccount(transferTargetOptions[0]?.acc_id ?? "");
+    setTransferRecipientUsername("");
+    setTransferRecipientUser(null);
+    setTransferRecipientAccounts([]);
+    setTransferTargetAccount("");
+    setTransferFailPoint("");
+    setTransferSubmittedOnce(false);
+    setSimulatedTransfer(null);
+    setSimulationMessage(null);
     setActiveModal("transfer");
     setError(null);
   };
 
   const closeModal = () => {
+    if (activeModal === "transfer" && isRecoveryRequired) {
+      setSimulationMessage(
+        "Recovery is required before closing this dialog or leaving the page.",
+      );
+      return;
+    }
     setActiveModal("none");
     setSubmitting(false);
+  };
+
+  const handleLookupRecipientAccounts = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("Missing auth token.");
+      return;
+    }
+
+    const normalizedUsername = transferRecipientUsername.trim().toLowerCase();
+    if (!normalizedUsername) {
+      setError("Enter recipient username.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await getRecipientAccounts(token, normalizedUsername);
+      const accountsForTransfer = response.accounts.filter(
+        (account) => account.acc_id !== selectedAccount,
+      );
+
+      setTransferRecipientUser(response.user);
+      setTransferRecipientAccounts(accountsForTransfer);
+      setTransferTargetAccount(accountsForTransfer[0]?.acc_id ?? "");
+
+      if (accountsForTransfer.length === 0) {
+        setError("Recipient has no available account for this transfer.");
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch recipient accounts.";
+      setError(message);
+      setTransferRecipientUser(null);
+      setTransferRecipientAccounts([]);
+      setTransferTargetAccount("");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSubmitAdjust = async (event: React.FormEvent) => {
@@ -175,6 +273,10 @@ const TransactionsPage = () => {
 
   const handleSubmitTransfer = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (transferSubmittedOnce) {
+      return;
+    }
+
     const token = localStorage.getItem("token");
     if (!token || !selectedAccount) {
       setError("Missing auth token or selected account.");
@@ -192,17 +294,133 @@ const TransactionsPage = () => {
       return;
     }
 
+    const sourceUserId = selectedAccountData?.user_id;
+    const recipientUserId = transferRecipientUser?.id;
+    if (transferFailPoint && (!sourceUserId || !recipientUserId)) {
+      setError("Choose recipient user and account before simulated transfer.");
+      return;
+    }
+
     setSubmitting(true);
+    setTransferSubmittedOnce(true);
     setError(null);
+    setSimulationMessage(null);
     try {
-      await makeAccountTransfer(token, selectedAccount, transferTargetAccount, amount);
+      if (transferFailPoint && sourceUserId && recipientUserId) {
+        const simulation = await simulateTransferWithFailPoint(token, {
+          senderId: sourceUserId,
+          receiverId: recipientUserId,
+          senderAccountId: selectedAccount,
+          receiverAccountId: transferTargetAccount,
+          amount,
+          failPoint: transferFailPoint,
+        });
+        setSimulatedTransfer(mapSimulationView(simulation));
+        setSimulationMessage("Simulation completed. Check the phase below.");
+      } else {
+        await makeAccountTransfer(token, selectedAccount, transferTargetAccount, amount);
+        closeModal();
+      }
+
       await loadOverviewAndTransactions(token, selectedAccount);
-      closeModal();
+      setSubmitting(false);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to execute transfer.";
       setError(message);
       setSubmitting(false);
+    }
+  };
+
+  const handleRefreshSimulationStatus = async () => {
+    const token = localStorage.getItem("token");
+    if (!token || !simulatedTransfer) {
+      return;
+    }
+
+    setRecovering(true);
+    setError(null);
+    setSimulationMessage(null);
+    try {
+      const status = await getTransactionStatus(token, simulatedTransfer.transactionId);
+      if (!status.found) {
+        setSimulationMessage("Transaction not found.");
+        return;
+      }
+
+      setSimulatedTransfer((previous) => {
+        if (!previous) {
+          return null;
+        }
+
+        if (status.state) {
+          return {
+            success: status.state.phase === "COMMITTED",
+            transactionId: status.transactionId,
+            phase: status.state.phase,
+            failPointTriggered: status.state.failPointTriggered,
+            errorMessage: status.state.errorMessage,
+          };
+        }
+
+        return {
+          ...previous,
+          phase: status.phase ?? previous.phase,
+        };
+      });
+      setSimulationMessage("Status refreshed.");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch transaction status.";
+      setError(message);
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const handleRecoverSimulation = async () => {
+    const token = localStorage.getItem("token");
+    if (!token || !simulatedTransfer) {
+      return;
+    }
+
+    setRecovering(true);
+    setError(null);
+    setSimulationMessage(null);
+    try {
+      const recovery = await recoverTransaction(token, simulatedTransfer.transactionId);
+      setSimulationMessage(recovery.message);
+
+      const status = await getTransactionStatus(token, simulatedTransfer.transactionId);
+      if (status.found) {
+        setSimulatedTransfer((previous) => {
+          if (!previous) {
+            return null;
+          }
+
+          if (status.state) {
+            return {
+              success: status.state.phase === "COMMITTED",
+              transactionId: status.transactionId,
+              phase: status.state.phase,
+              failPointTriggered: status.state.failPointTriggered,
+              errorMessage: status.state.errorMessage,
+            };
+          }
+
+          return {
+            ...previous,
+            phase: status.phase ?? previous.phase,
+          };
+        });
+      }
+
+      await loadOverviewAndTransactions(token, selectedAccount);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Recovery failed.";
+      setError(message);
+    } finally {
+      setRecovering(false);
     }
   };
 
@@ -216,10 +434,21 @@ const TransactionsPage = () => {
             Select account, then choose Deposit/Withdraw or Make Transaction.
           </p>
         </div>
-        <button className="btn btn-secondary" onClick={() => navigate("/home")}>
+        <button
+          className="btn btn-secondary"
+          onClick={() => navigate("/home")}
+          disabled={isRecoveryRequired}
+        >
           Back to Dashboard
         </button>
       </header>
+
+      {isRecoveryRequired && (
+        <p className="home-state home-state-error">
+          Transaction is IN_DOUBT. Run Recover and refresh status before leaving this
+          page.
+        </p>
+      )}
 
       {loading && <p className="home-state">Loading accounts...</p>}
       {error && <p className="home-state home-state-error">{error}</p>}
@@ -262,12 +491,7 @@ const TransactionsPage = () => {
             <button className="btn btn-primary" type="button" onClick={openAdjustModal}>
               Deposit / Withdraw
             </button>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              onClick={openTransferModal}
-              disabled={transferTargetOptions.length === 0}
-            >
+            <button className="btn btn-ghost" type="button" onClick={openTransferModal}>
               Make Transaction
             </button>
           </div>
@@ -321,7 +545,13 @@ const TransactionsPage = () => {
       </section>
 
       {activeModal !== "none" && (
-        <div className="modal-overlay" onClick={closeModal} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            void closeModal();
+          }}
+          role="presentation"
+        >
           <div
             className="modal-card"
             onClick={(event) => event.stopPropagation()}
@@ -366,7 +596,11 @@ const TransactionsPage = () => {
                 </div>
 
                 <div className="modal-actions">
-                  <button className="btn btn-primary" type="submit" disabled={submitting}>
+                  <button
+                    className="btn btn-primary"
+                    type="submit"
+                    disabled={submitting || transferSubmittedOnce}
+                  >
                     {submitting ? "Applying..." : "Apply"}
                   </button>
                   <button className="btn btn-secondary" type="button" onClick={closeModal}>
@@ -384,13 +618,44 @@ const TransactionsPage = () => {
                 </p>
 
                 <div className="transactions-input-row">
+                  <label htmlFor="recipientUsername">Username</label>
+                  <input
+                    id="recipientUsername"
+                    type="text"
+                    value={transferRecipientUsername}
+                    onChange={(event) =>
+                      setTransferRecipientUsername(event.target.value)
+                    }
+                    placeholder="Recipient username"
+                  />
+                </div>
+
+                <div className="modal-actions modal-actions-left">
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={handleLookupRecipientAccounts}
+                    disabled={submitting}
+                  >
+                    {submitting ? "Searching..." : "Find recipient accounts"}
+                  </button>
+                </div>
+
+                {transferRecipientUser && (
+                  <p>
+                    Recipient user: <strong>{transferRecipientUser.username}</strong>
+                  </p>
+                )}
+
+                <div className="transactions-input-row">
                   <label htmlFor="targetAccount">To account id</label>
                   <select
                     id="targetAccount"
                     value={transferTargetAccount}
                     onChange={(event) => setTransferTargetAccount(event.target.value)}
+                    disabled={transferRecipientAccounts.length === 0}
                   >
-                    {transferTargetOptions.map((account) => (
+                    {transferRecipientAccounts.map((account) => (
                       <option key={account.acc_id} value={account.acc_id}>
                         {account.acc_id}
                       </option>
@@ -411,11 +676,86 @@ const TransactionsPage = () => {
                   />
                 </div>
 
+                <div className="transactions-input-row">
+                  <label htmlFor="transferFailPoint">FailPoint</label>
+                  <select
+                    id="transferFailPoint"
+                    value={transferFailPoint}
+                    onChange={(event) =>
+                      setTransferFailPoint(event.target.value as FailPoint | "")
+                    }
+                  >
+                    <option value="">No simulation (normal transfer)</option>
+                    {FAIL_POINT_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {simulatedTransfer && (
+                  <div className="simulation-result">
+                    <p>
+                      <strong>transactionId:</strong> {simulatedTransfer.transactionId}
+                    </p>
+                    <p>
+                      <strong>phase:</strong> {simulatedTransfer.phase}
+                    </p>
+                    {simulatedTransfer.failPointTriggered && (
+                      <p>
+                        <strong>failPoint:</strong>{" "}
+                        {simulatedTransfer.failPointTriggered}
+                      </p>
+                    )}
+                    {simulatedTransfer.errorMessage && (
+                      <p>
+                        <strong>error:</strong> {simulatedTransfer.errorMessage}
+                      </p>
+                    )}
+                    {simulationMessage && (
+                      <p>
+                        <strong>message:</strong> {simulationMessage}
+                      </p>
+                    )}
+
+                    <div className="modal-actions modal-actions-left">
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={handleRefreshSimulationStatus}
+                        disabled={recovering}
+                      >
+                        {recovering ? "Refreshing..." : "Refresh status"}
+                      </button>
+                      {simulatedTransfer.phase === "IN_DOUBT" && (
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={handleRecoverSimulation}
+                          disabled={recovering}
+                        >
+                          {recovering ? "Recovering..." : "Recover"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="modal-actions">
                   <button className="btn btn-primary" type="submit" disabled={submitting}>
-                    {submitting ? "Submitting..." : "Send"}
+                    {submitting
+                      ? "Submitting..."
+                      : transferSubmittedOnce
+                        ? "Sent"
+                        : "Send"}
                   </button>
-                  <button className="btn btn-secondary" type="button" onClick={closeModal}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={closeModal}
+                    disabled={isRecoveryRequired}
+                  >
                     Cancel
                   </button>
                 </div>

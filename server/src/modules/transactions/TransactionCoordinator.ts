@@ -51,6 +51,8 @@ export class TransactionCoordinator {
     let ledgerClient: PoolClient | null = null;
     let coreTransactionStarted = false;
     let ledgerTransactionStarted = false;
+    let coreCommitAttempted = false;
+    let ledgerCommitAttempted = false;
 
     try {
       coreClient = await corePool.connect();
@@ -93,12 +95,14 @@ export class TransactionCoordinator {
       state.phase = CoordinatorPhase.COMMITTING;
       this.setState(state);
 
+      coreCommitAttempted = true;
       await coreClient.query("COMMIT");
       state.coreCommitted = true;
       this.setState(state);
       this.failpoints.assertNoFailure(FailPoint.AFTER_CORE_COMMIT, request.failPoint);
 
       await this.ledgerRepository.markCommitted(ledgerClient, transactionId);
+      ledgerCommitAttempted = true;
       await ledgerClient.query("COMMIT");
       state.ledgerCommitted = true;
       this.setState(state);
@@ -125,6 +129,10 @@ export class TransactionCoordinator {
 
       const bothCommitted = state.coreCommitted && state.ledgerCommitted;
       const hasPartialCommit = state.coreCommitted || state.ledgerCommitted;
+      const enteredCommitBoundary =
+        state.phase === CoordinatorPhase.COMMITTING ||
+        coreCommitAttempted ||
+        ledgerCommitAttempted;
 
       if (coreClient && coreTransactionStarted && !state.coreCommitted) {
         await this.rollbackSafely(coreClient, "core", state);
@@ -136,7 +144,7 @@ export class TransactionCoordinator {
 
       if (bothCommitted) {
         state.phase = CoordinatorPhase.COMMITTED;
-      } else if (hasPartialCommit) {
+      } else if (hasPartialCommit || enteredCommitBoundary) {
         state.phase = CoordinatorPhase.IN_DOUBT;
       } else {
         state.phase = CoordinatorPhase.ABORTED;

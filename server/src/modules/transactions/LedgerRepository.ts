@@ -176,7 +176,7 @@ export class LedgerRepository {
         from_acc,
         to_acc,
         amount::text AS amount,
-        status,
+        UPPER(status)::text AS status,
         created_at::text AS created_at
       FROM transactions
       WHERE trx_id = $1::uuid

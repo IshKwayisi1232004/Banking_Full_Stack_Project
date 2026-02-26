@@ -65,6 +65,11 @@ interface TransferTargetRow {
   user_id: string;
 }
 
+interface RecipientUserRow {
+  id: string;
+  username: string;
+}
+
 const transactionCoordinator = new TransactionCoordinator();
 
 function parseLimit(rawLimit: unknown): number {
@@ -257,6 +262,98 @@ router.get("/overview", requireAuth, async (req: AuthenticatedRequest, res) => {
 });
 
 router.get(
+  "/recipient-accounts",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    const requesterUserId = req.auth?.sub;
+    if (!requesterUserId) {
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const rawUsername = String(req.query.username ?? "").trim().toLowerCase();
+    if (!rawUsername) {
+      res.status(400).json({ message: "username query param is required." });
+      return;
+    }
+
+    try {
+      const userResult = await corePool.query<RecipientUserRow>(
+        `
+        SELECT id, username
+        FROM users
+        WHERE LOWER(username) = $1
+        LIMIT 1
+        `,
+        [rawUsername],
+      );
+
+      const user = userResult.rows[0];
+      if (!user) {
+        res.status(404).json({ message: "Recipient user not found." });
+        return;
+      }
+
+      const accountsResult = await corePool.query<OverviewAccountRow>(
+        `
+        SELECT
+          acc_id,
+          user_id,
+          balance::text AS balance
+        FROM accounts
+        WHERE user_id = $1::uuid
+        ORDER BY created_at DESC
+        `,
+        [user.id],
+      );
+
+      res.status(200).json({
+        user,
+        accounts: accountsResult.rows,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Server error.";
+      res.status(500).json({ message });
+    }
+  },
+);
+
+router.delete("/:accId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  const userId = req.auth?.sub;
+  const { accId } = req.params;
+  if (!userId) {
+    res.status(401).json({ message: "Unauthorized." });
+    return;
+  }
+  if (!accId) {
+    res.status(400).json({ message: "Missing account id." });
+    return;
+  }
+
+  try {
+    const deleted = await corePool.query<{ acc_id: string }>(
+      `
+      DELETE FROM accounts
+      WHERE acc_id = $1::uuid
+        AND user_id = $2::uuid
+      RETURNING acc_id
+      `,
+      [accId, userId],
+    );
+
+    if (deleted.rowCount !== 1) {
+      res.status(404).json({ message: "Account not found." });
+      return;
+    }
+
+    res.status(200).json({ success: true, acc_id: accId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Server error.";
+    res.status(500).json({ message });
+  }
+});
+
+router.get(
   "/:accId/transactions",
   requireAuth,
   async (req: AuthenticatedRequest, res) => {
@@ -301,7 +398,7 @@ router.get(
           ${schema.fromColumn}::text AS source_id,
           ${schema.toColumn}::text AS target_id,
           amount::text AS amount,
-          status,
+          UPPER(status)::text AS status,
           created_at::text AS created_at
         FROM transactions
         WHERE ${schema.fromColumn} = $1::uuid
@@ -453,6 +550,7 @@ router.post(
             updated_at = NOW()
         WHERE acc_id = $2::uuid
           AND user_id = $3::uuid
+          AND ($1::numeric >= 0 OR balance + $1::numeric >= 0)
         RETURNING
           acc_id,
           user_id,
@@ -463,8 +561,23 @@ router.post(
 
       const account = updated.rows[0];
       if (!account) {
+        const exists = await coreClient.query<{ acc_id: string }>(
+          `
+          SELECT acc_id
+          FROM accounts
+          WHERE acc_id = $1::uuid
+            AND user_id = $2::uuid
+          LIMIT 1
+          `,
+          [accId, userId],
+        );
+
         await coreClient.query("ROLLBACK");
         await ledgerClient.query("ROLLBACK");
+        if (exists.rowCount === 1) {
+          res.status(409).json({ message: "Insufficient funds." });
+          return;
+        }
         res.status(404).json({ message: "Account not found." });
         return;
       }
@@ -475,7 +588,7 @@ router.post(
         await ledgerClient.query(
           `
           INSERT INTO transactions (${schema.idColumn}, from_usr_id, to_usr_id, amount, status)
-          VALUES ($1::uuid, $2::uuid, $2::uuid, $3::numeric, 'committed')
+          VALUES ($1::uuid, $2::uuid, $2::uuid, $3::numeric, 'COMMITTED')
           `,
           [randomUUID(), userId, delta],
         );
@@ -483,7 +596,7 @@ router.post(
         await ledgerClient.query(
           `
           INSERT INTO transactions (${schema.idColumn}, from_acc, to_acc, amount, status)
-          VALUES ($1::uuid, $2::uuid, $2::uuid, $3::numeric, 'committed')
+          VALUES ($1::uuid, $2::uuid, $2::uuid, $3::numeric, 'COMMITTED')
           `,
           [randomUUID(), accId, delta],
         );

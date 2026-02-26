@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAccount, getAccountsOverview } from "../services/accountsService";
+import {
+  createAccount,
+  deleteAccount,
+  getAccountsOverview,
+} from "../services/accountsService";
 import type { AccountInfo, OverviewUser } from "../types/account";
 
 const HomePage = () => {
@@ -9,6 +13,7 @@ const HomePage = () => {
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refreshOverview = async (token: string): Promise<void> => {
@@ -64,6 +69,27 @@ const HomePage = () => {
     }
   };
 
+  const handleDeleteAccount = async (accountId: string) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    setDeletingAccountId(accountId);
+    setError(null);
+    try {
+      await deleteAccount(token, accountId);
+      await refreshOverview(token);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete account.";
+      setError(message);
+    } finally {
+      setDeletingAccountId(null);
+    }
+  };
+
   return (
     <div className="home-page">
       <header className="home-header">
@@ -112,18 +138,28 @@ const HomePage = () => {
         </div>
         <div className="history-list">
           {accounts.map((account) => (
-            <button
-              key={account.acc_id}
-              className="history-row account-row-button"
-              onClick={() =>
-                navigate(`/transactions?accountId=${account.acc_id}`)
-              }
-              type="button"
-            >
+            <div key={account.acc_id} className="history-row account-row">
               <span>{account.acc_id}</span>
               <span>{account.user_id}</span>
               <strong className="amount-positive">${account.balance}</strong>
-            </button>
+              <div className="account-row-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => navigate(`/transactions?accountId=${account.acc_id}`)}
+                >
+                  Open
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleDeleteAccount(account.acc_id)}
+                  disabled={deletingAccountId === account.acc_id}
+                >
+                  {deletingAccountId === account.acc_id ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
           ))}
           {accounts.length === 0 && !loading && (
             <p className="home-state">No accounts found for this user.</p>

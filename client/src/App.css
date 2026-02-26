@@ -233,6 +233,16 @@
   background: #f9fbff;
 }
 
+.account-row {
+  grid-template-columns: 1fr 1fr 140px auto;
+}
+
+.account-row-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 .chip {
   display: inline-flex;
   justify-content: center;
@@ -497,6 +507,22 @@
   display: flex;
   gap: 0.6rem;
   justify-content: flex-end;
+}
+
+.modal-actions-left {
+  justify-content: flex-start;
+}
+
+.simulation-result {
+  border: 1px solid #d7deea;
+  border-radius: 10px;
+  background: #f8faff;
+  padding: 0.75rem;
+  color: #1d3047;
+}
+
+.simulation-result p {
+  margin: 0.2rem 0;
 }
 
 @media (max-width: 900px) {
