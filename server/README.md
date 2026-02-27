@@ -1,43 +1,37 @@
 # Server (Backend)
 
-A small backend built with **Node.js + Express + TypeScript**.
+Node.js + Express + TypeScript API for authentication, accounts, and transactions.
 
-## Tech Stack
-- `express` — HTTP API
-- `dotenv` — loads environment variables from `.env`
-- `cors` — enables requests from frontend origins
-- `morgan` — HTTP request logging
-- `typescript` + `tsx` — TypeScript development and runtime
-
-## Install Dependencies
+## Run locally
 ```bash
 cd server
 npm install
-```
-
-## Environment Variables
-File: `.env`
-
-Minimum setup:
-```env
-PORT=5001
-```
-
-## Run in Development
-```bash
-cd server
 npm run dev
 ```
 
-## Build and Run in Production
+Default API URL: `http://localhost:5001`
+
+## Required environment variables
+Create `server/.env`:
+
+```env
+PORT=5001
+CORE_DB_URL=postgresql://...
+LEDGER_DB_URL=postgresql://...
+JWT_SECRET=your_secret
+JWT_EXPIRES_IN=24h
+```
+
+## Build / start / typecheck
 ```bash
 cd server
 npm run build
 npm run start
-```
-
-## Type Check
-```bash
-cd server
 npm run typecheck
 ```
+
+## Main folders
+- `src/modules/auth` - register/login/me + JWT middleware
+- `src/modules/accounts` - overview, account actions, account transactions
+- `src/modules/transactions` - 2PC coordinator, failpoints, recover
+- `src/db` - database pools
